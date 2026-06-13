@@ -62,6 +62,16 @@ services:
       - "--embedding"
     restart: unless-stopped
 
+  kokoro-tts:
+    image: ghcr.io/remsky/kokoro-fastapi-cpu:latest
+    container_name: kokoro-tts
+    ports:
+      - "8880:8880"
+    environment:
+      - DEVICE=cpu
+      - PORT=8880
+    restart: unless-stopped
+
 volumes:
   etcd:
   minio:
