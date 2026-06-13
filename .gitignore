@@ -3,4 +3,6 @@ volumes/
 mcp_server/.env
 models/
 scratch/synthetic_codebase/
+bin/
+run-vulkan-embedding.ps1
 
