@@ -22,7 +22,7 @@ if (-not (Test-Path $ScratchDir)) {
 }
 
 # 2. Restore Code Repositories
-Write-Host "`n[1/7] Restoring clean code repositories from Google Drive..." -ForegroundColor Cyan
+Write-Host "`n[1/8] Restoring clean code repositories from Google Drive..." -ForegroundColor Cyan
 $Repos = @("mcp-rag-outlook", "vLLM_5060TI", "Qwen3-TTS-Stack", "vLLM-Container-Manager")
 
 foreach ($Repo in $Repos) {
@@ -39,7 +39,7 @@ foreach ($Repo in $Repos) {
 }
 
 # 3. Restore Database Volumes
-Write-Host "`n[2/7] Restoring Milvus database volumes..." -ForegroundColor Cyan
+Write-Host "`n[2/8] Restoring Milvus database volumes..." -ForegroundColor Cyan
 $DbBackupPath = "$BackupRoot\database_volumes"
 if (Test-Path $DbBackupPath) {
     New-Item -ItemType Directory -Path $DbVolumes -Force | Out-Null
@@ -50,7 +50,7 @@ if (Test-Path $DbBackupPath) {
 }
 
 # 4. Restore Active Host Configs
-Write-Host "`n[3/7] Restoring user configuration profiles..." -ForegroundColor Cyan
+Write-Host "`n[3/8] Restoring user configuration profiles..." -ForegroundColor Cyan
 $OpenCodeConfigDir = "$Home\.config\opencode"
 $HermesConfigDir = "$Home\.hermes"
 
@@ -106,7 +106,7 @@ if (Test-Path $HermesAppSource) {
 
 
 # 5. Verify Embedding GGUF Model
-Write-Host "`n[4/7] Verifying embedding model GGUF file..." -ForegroundColor Cyan
+Write-Host "`n[4/8] Verifying embedding model GGUF file..." -ForegroundColor Cyan
 $ModelDest = "$ScratchDir\mcp-rag-outlook\models\nomic-embed-text-v1.5.Q8_0.gguf"
 if (-not (Test-Path $ModelDest)) {
     $CachedModel = "C:\Users\jeffr\.lmstudio\models\nomic-ai\nomic-embed-text-v1.5-GGUF\nomic-embed-text-v1.5.Q8_0.gguf"
@@ -123,23 +123,40 @@ if (-not (Test-Path $ModelDest)) {
 }
 
 # 6. Install Node.js Dependencies for MCP
-Write-Host "`n[5/7] Re-installing Node.js package dependencies..." -ForegroundColor Cyan
+Write-Host "`n[5/8] Re-installing Node.js package dependencies..." -ForegroundColor Cyan
 $McpDir = "$ScratchDir\mcp-rag-outlook\mcp_server"
 if (Test-Path $McpDir) {
     cmd.exe /c "cd `"$McpDir`" && npm install"
     Write-Host "Node.js packages installed successfully." -ForegroundColor Green
 }
 
-# 7. Start Docker Stacks
-Write-Host "`n[6/7] Starting Docker container stacks..." -ForegroundColor Cyan
-Write-Host "Launching RAG database, Kokoro TTS, and isolated embedding server..." -ForegroundColor Yellow
+# 7. Start Docker Stacks & Native Vulkan Server
+Write-Host "`n[6/8] Starting Docker container stacks..." -ForegroundColor Cyan
+Write-Host "Launching RAG database and Kokoro TTS services..." -ForegroundColor Yellow
 cmd.exe /c "cd `"$ScratchDir\mcp-rag-outlook`" && docker compose up -d"
 
 Write-Host "Launching vLLM GPU inference server and auth proxy..." -ForegroundColor Yellow
 cmd.exe /c "cd `"$ScratchDir\vLLM_5060TI`" && docker compose up -d"
 
+# 7b. Set Up and Launch Native Vulkan Embedding Server on AMD GPU
+Write-Host "`n[7/8] Setting up and starting native Vulkan embedding server..." -ForegroundColor Cyan
+$SetupVulkanScript = "$ScratchDir\mcp-rag-outlook\setup-vulkan-embedding.ps1"
+$RunVulkanScript = "$ScratchDir\mcp-rag-outlook\run-vulkan-embedding.ps1"
+
+if (Test-Path $SetupVulkanScript) {
+    Write-Host "Downloading Vulkan binaries and auto-configuring GPU indices..." -ForegroundColor Yellow
+    powershell.exe -ExecutionPolicy Bypass -File $SetupVulkanScript
+    
+    if (Test-Path $RunVulkanScript) {
+        Write-Host "Launching Vulkan embedding server in a minimized window..." -ForegroundColor Green
+        Start-Process powershell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$RunVulkanScript`"" -WindowStyle Minimized
+    }
+} else {
+    Write-Warning "Vulkan setup script not found at $SetupVulkanScript"
+}
+
 # 8. Register Background Auto-Backup Scheduler Task
-Write-Host "`n[7/7] Registering 15-minute scheduled cloud backup task..." -ForegroundColor Cyan
+Write-Host "`n[8/8] Registering 15-minute scheduled cloud backup task..." -ForegroundColor Cyan
 $Action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-WindowStyle Hidden -Command & '$ScratchDir\mcp-rag-outlook\backup-workstation.ps1'"
 $Trigger = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 15)
 $Settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable

@@ -51,8 +51,18 @@ Write-Host "`n[3/3] Listing available Vulkan devices on your system..." -Foregro
 $LlamaServer = "$BinDir\llama-server.exe"
 
 if (Test-Path $LlamaServer) {
-    Write-Host "Executing llama-server.exe --list-devices...`n" -ForegroundColor Yellow
-    & $LlamaServer --list-devices
+    Write-Host "Executing llama-server.exe --list-devices to auto-detect AMD GPU..." -ForegroundColor Yellow
+    $DeviceOutput = & $LlamaServer --list-devices 2>&1
+    $DeviceOutput | Out-String | Write-Host
+    
+    $DeviceIndex = "Vulkan1" # Fallback default
+    foreach ($Line in $DeviceOutput) {
+        if ($Line -match "(Vulkan\d+):\s+.*AMD.*") {
+            $DeviceIndex = $Matches[1]
+            Write-Host "Auto-detected AMD GPU index: $DeviceIndex" -ForegroundColor Green
+            break
+        }
+    }
     
     # Generate a launch script shortcut for the user
     $LaunchScriptPath = "$McpDir\run-vulkan-embedding.ps1"
@@ -67,18 +77,16 @@ if (Test-Path $LlamaServer) {
 Write-Host "Starting Vulkan embedding server on host port 8080..." -ForegroundColor Green
 Write-Host "Offloading 100% of layers to GPU..." -ForegroundColor Yellow
 
-# NOTE: Change 'Vulkan1' to match the index of your AMD Radeon RX 5700 GPU
-& `$LlamaServer -m "`$ModelPath" -c 2048 --port 8080 --embedding --device Vulkan1 -ngl 99
+& `$LlamaServer -m "`$ModelPath" -c 2048 --port 8080 --embedding --device $DeviceIndex -ngl 99
 "@
     Set-Content -Path $LaunchScriptPath -Value $LaunchScriptContent
     Write-Host "`nGenerated launch script at: $LaunchScriptPath" -ForegroundColor Green
     
     Write-Host "`n==========================================================" -ForegroundColor Green
     Write-Host "SETUP COMPLETE!" -ForegroundColor Green
-    Write-Host "1. Look at the Vulkan device list above and find your AMD Radeon RX 5700." -ForegroundColor Yellow
-    Write-Host "2. Edit $LaunchScriptPath and change 'Vulkan1' to match your AMD GPU index if needed." -ForegroundColor Yellow
-    Write-Host "3. Run $LaunchScriptPath to start the server." -ForegroundColor Yellow
-    Write-Host "4. Disable the CPU container from your docker-compose.yml by commenting it out." -ForegroundColor Yellow
+    Write-Host "1. Verified and configured device index: $DeviceIndex" -ForegroundColor Yellow
+    Write-Host "2. Run $LaunchScriptPath to start the server." -ForegroundColor Yellow
+    Write-Host "3. Disable the CPU container from your docker-compose.yml by commenting it out." -ForegroundColor Yellow
     Write-Host "==========================================================" -ForegroundColor Green
 } else {
     Write-Error "Could not locate llama-server.exe in extracted directory."
