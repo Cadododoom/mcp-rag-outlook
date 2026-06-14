@@ -23,7 +23,7 @@ if (-not (Test-Path $ScratchDir)) {
 
 # 2. Restore Code Repositories
 Write-Host "`n[1/8] Restoring clean code repositories from Google Drive..." -ForegroundColor Cyan
-$Repos = @("mcp-rag-outlook", "vLLM_5060TI", "Qwen3-TTS-Stack", "vLLM-Container-Manager")
+$Repos = @("mcp-rag-outlook", "vLLM_5060TI", "Qwen3-TTS-Stack", "vLLM-Container-Manager", "Hermes-Swarm-Director")
 
 foreach ($Repo in $Repos) {
     $SourcePath = "$BackupRoot\repositories\$Repo"
@@ -93,13 +93,28 @@ if (Test-Path $HermesAppSource) {
     }
     
     # Restore database files and config parameters
-    $HermesFiles = @("state.db", "config.yaml", "auth.json", ".env", "SOUL.md")
+    $HermesFiles = @("state.db", "config.yaml", "auth.json", ".env", "SOUL.md", "hermes-setup.exe")
     foreach ($File in $HermesFiles) {
         if (Test-Path "$HermesAppSource\$File") {
             Copy-Item "$HermesAppSource\$File" "$HermesAppDir\$File" -Force
         }
     }
     Write-Host "Hermes Agent active AppData restored successfully." -ForegroundColor Green
+
+    # Install Web Dashboard dependencies in the virtual environment
+    $VenvPip = "$HermesAppDir\hermes-agent\venv\Scripts\pip.exe"
+    if (Test-Path $VenvPip) {
+        Write-Host "Installing Web Dashboard and terminal extras..." -ForegroundColor Yellow
+        Start-Process $VenvPip -ArgumentList "install 'hermes-agent[web,pty]'" -Wait -NoNewWindow
+    }
+
+    # Automatically install/update Hermes Desktop App
+    $DesktopInstaller = "$HermesAppDir\hermes-setup.exe"
+    if (Test-Path $DesktopInstaller) {
+        Write-Host "Installing Hermes Desktop application silently..." -ForegroundColor Yellow
+        Start-Process $DesktopInstaller -ArgumentList "/S" -Wait
+        Write-Host "Hermes Desktop application installed successfully." -ForegroundColor Green
+    }
 } else {
     Write-Warning "Hermes active AppData backup not found on G Drive."
 }
@@ -155,6 +170,33 @@ if (Test-Path $SetupVulkanScript) {
     Write-Warning "Vulkan setup script not found at $SetupVulkanScript"
 }
 
+# 7c. Set Up and Launch Hermes Web Dashboard Server
+Write-Host "`n[7c] Setting up and starting Hermes Web Dashboard server..." -ForegroundColor Cyan
+$RunDashboardScript = "$ScratchDir\mcp-rag-outlook\run-hermes-dashboard.ps1"
+
+if (-not (Test-Path $RunDashboardScript)) {
+    $DashboardContent = @"
+# Start Hermes Web Dashboard bound to all interfaces
+Set-Location "C:\Users\jeffr\AppData\Local\hermes\hermes-agent"
+& "C:\Users\jeffr\AppData\Local\hermes\hermes-agent\venv\Scripts\python.exe" -m hermes_cli.main dashboard --host 0.0.0.0 --port 9119 --no-open
+"@
+    Out-File -InputObject $DashboardContent -FilePath $RunDashboardScript -Encoding utf8
+    Write-Host "Created run-hermes-dashboard.ps1 script." -ForegroundColor Yellow
+}
+
+Write-Host "Launching Hermes Web Dashboard server in a minimized window..." -ForegroundColor Green
+Start-Process powershell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$RunDashboardScript`"" -WindowStyle Minimized
+
+# 7d. Launch Hermes Swarm Director Orchestration Suite
+Write-Host "`n[7d] Starting Hermes Swarm Director Orchestration suite..." -ForegroundColor Cyan
+$RunDirectorScript = "$ScratchDir\mcp-rag-outlook\run-hermes-swarm-director.ps1"
+if (Test-Path $RunDirectorScript) {
+    Write-Host "Launching Hermes Swarm Director backend services in a minimized window..." -ForegroundColor Green
+    Start-Process powershell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$RunDirectorScript`"" -WindowStyle Minimized
+} else {
+    Write-Warning "Hermes Swarm Director launch script not found at $RunDirectorScript"
+}
+
 # 8. Register Background Auto-Backup Scheduler Task
 Write-Host "`n[8/8] Registering 15-minute scheduled cloud backup task..." -ForegroundColor Cyan
 $Action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-WindowStyle Hidden -Command & '$ScratchDir\mcp-rag-outlook\backup-workstation.ps1'"
@@ -163,6 +205,44 @@ $Settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoi
 Register-ScheduledTask -TaskName "MilvusSyncGDrive" -Action $Action -Trigger $Trigger -Settings $Settings -Force | Out-Null
 Write-Host "Registered background backup scheduler task 'MilvusSyncGDrive'." -ForegroundColor Green
 
+# 9. Configure GPU WDDM TDR Registry Delays (AMD RX 5700 Vulkan TTS Support)
+Write-Host "`n[9/9] Configuring GPU WDDM TDR registry delays..." -ForegroundColor Cyan
+$RegistryPath = "HKLM:\SYSTEM\CurrentControlSet\Control\GraphicsDrivers"
+if (Test-Path $RegistryPath) {
+    $CurrentTdr = Get-ItemProperty -Path $RegistryPath -Name "TdrDelay" -ErrorAction SilentlyContinue
+    $CurrentTdrDdi = Get-ItemProperty -Path $RegistryPath -Name "TdrDdiDelay" -ErrorAction SilentlyContinue
+    
+    $NeedsRestart = $false
+    
+    if ($null -eq $CurrentTdr -or $CurrentTdr.TdrDelay -ne 30) {
+        Set-ItemProperty -Path $RegistryPath -Name "TdrDelay" -Value 30 -Type DWord -Force | Out-Null
+        Write-Host "Set TdrDelay registry key to 30." -ForegroundColor Green
+        $NeedsRestart = $true
+    }
+    if ($null -eq $CurrentTdrDdi -or $CurrentTdrDdi.TdrDdiDelay -ne 30) {
+        Set-ItemProperty -Path $RegistryPath -Name "TdrDdiDelay" -Value 30 -Type DWord -Force | Out-Null
+        Write-Host "Set TdrDdiDelay registry key to 30." -ForegroundColor Green
+        $NeedsRestart = $true
+    }
+    
+    if ($NeedsRestart) {
+        Write-Host "`n[WARNING] GPU TDR registry modifications were applied to support AMD Vulkan TTS weights processing." -ForegroundColor Yellow
+        Write-Host "A system restart is required for these registry changes to take effect." -ForegroundColor Yellow
+        
+        $Response = Read-Host "Would you like to restart the workstation now? (y/n)"
+        if ($Response -eq "y" -or $Response -eq "yes") {
+            Write-Host "Restarting workstation in 5 seconds..." -ForegroundColor Red
+            Start-Sleep -Seconds 5
+            Restart-Computer -Force
+        } else {
+            Write-Host "Please remember to restart the machine manually later before using the AMD GPU for TTS." -ForegroundColor Yellow
+        }
+    } else {
+        Write-Host "GPU WDDM TDR registry values already correctly configured (TdrDelay = 30)." -ForegroundColor Green
+    }
+}
+
 Write-Host "`n==========================================================" -ForegroundColor Green
 Write-Host "       AI WORKSTATION RESTORE COMPLETED SUCCESSFULLY!       " -ForegroundColor Green
 Write-Host "==========================================================" -ForegroundColor Green
+Write-Host "`n[TIP] Run 'powershell -File C:\Users\jeffr\.gemini\antigravity\scratch\mcp-rag-outlook\configure-workstation-security.ps1' to rotate/set fresh passwords for remote access." -ForegroundColor Cyan

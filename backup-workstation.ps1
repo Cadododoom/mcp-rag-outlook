@@ -30,7 +30,7 @@ if (Test-Path $DbVolumes) {
 
 # 3. Backup Repositories (with exclusions)
 Write-Host "`n[2/3] Mirroring code repositories (excluding caches & node_modules)..." -ForegroundColor Cyan
-$Repos = @("mcp-rag-outlook", "vLLM_5060TI", "Qwen3-TTS-Stack", "vLLM-Container-Manager")
+$Repos = @("mcp-rag-outlook", "vLLM_5060TI", "Qwen3-TTS-Stack", "vLLM-Container-Manager", "Hermes-Swarm-Director")
 
 foreach ($Repo in $Repos) {
     $SourcePath = "$ScratchDir\$Repo"
@@ -71,16 +71,42 @@ $HermesAppDest = "$BackupRoot\hermes_app_data"
 if (Test-Path $HermesAppDir) {
     New-Item -ItemType Directory -Path $HermesAppDest -Force | Out-Null
     
-    # Mirror active state/profile directories
-    $HermesFolders = @("profiles", "skills", "sessions", "memories", "state-snapshots")
+    # Mirror standard active state/profile directories (excluding profiles and skills since they are zipped)
+    $HermesFolders = @("sessions", "memories", "state-snapshots")
     foreach ($Folder in $HermesFolders) {
         if (Test-Path "$HermesAppDir\$Folder") {
             robocopy "$HermesAppDir\$Folder" "$HermesAppDest\$Folder" /MIR /MT:8 /FFT /R:3 /W:5 /NP /NDL /NFL
         }
     }
     
+    # Backup custom profiles and skills by zipping them (massive reduction in file count, avoids cloud sync locks)
+    $HermesZips = @("profiles", "skills")
+    foreach ($Folder in $HermesZips) {
+        $SrcDir = "$HermesAppDir\$Folder"
+        $DestZip = "$HermesAppDest\$Folder.zip"
+        $TempZip = "$env:TEMP\$Folder.zip"
+        if (Test-Path $SrcDir) {
+            Write-Host "Zipping $Folder to $DestZip..." -ForegroundColor Yellow
+            if (Test-Path $TempZip) {
+                Remove-Item $TempZip -Force
+            }
+            Compress-Archive -Path "$SrcDir\*" -DestinationPath $TempZip -Force
+            if (Test-Path $DestZip) {
+                try {
+                    Remove-Item $DestZip -Force
+                } catch {
+                    Write-Warning "File locked: $DestZip. Retrying in 2 seconds..."
+                    Start-Sleep -Seconds 2
+                    Remove-Item $DestZip -Force
+                }
+            }
+            Copy-Item $TempZip $DestZip -Force
+            Remove-Item $TempZip -Force
+        }
+    }
+    
     # Copy database files and config parameters
-    $HermesFiles = @("state.db", "config.yaml", "auth.json", ".env", "SOUL.md")
+    $HermesFiles = @("state.db", "config.yaml", "auth.json", ".env", "SOUL.md", "hermes-setup.exe")
     foreach ($File in $HermesFiles) {
         if (Test-Path "$HermesAppDir\$File") {
             Copy-Item "$HermesAppDir\$File" "$HermesAppDest\$File" -Force
@@ -89,6 +115,26 @@ if (Test-Path $HermesAppDir) {
     Write-Host "Hermes Agent active AppData backed up successfully." -ForegroundColor Green
 } else {
     Write-Warning "Hermes AppData folder not found at $HermesAppDir."
+}
+
+# 6. Backup Hermes Swarm Director active database and environment config
+Write-Host "`n[5/5] Backing up Hermes Swarm Director active databases..." -ForegroundColor Cyan
+$SwarmDirectorLocal = "$ScratchDir\Hermes-Swarm-Director"
+$SwarmDirectorDest = "$BackupRoot\hermes_swarm_director_backup"
+
+if (Test-Path $SwarmDirectorLocal) {
+    New-Item -ItemType Directory -Path $SwarmDirectorDest -Force | Out-Null
+    if (Test-Path "$SwarmDirectorLocal\director.db") {
+        # Safe file copy since it's local
+        Copy-Item "$SwarmDirectorLocal\director.db" "$SwarmDirectorDest\director.db" -Force
+        Write-Host "Backed up Hermes Swarm Director database (director.db)." -ForegroundColor Green
+    }
+    if (Test-Path "$SwarmDirectorLocal\.env") {
+        Copy-Item "$SwarmDirectorLocal\.env" "$SwarmDirectorDest\.env" -Force
+        Write-Host "Backed up Hermes Swarm Director configuration (.env)." -ForegroundColor Green
+    }
+} else {
+    Write-Warning "Hermes Swarm Director workspace not found at $SwarmDirectorLocal."
 }
 
 # Copy the master restore script directly to the backup root so it is easily accessible on a fresh OS
