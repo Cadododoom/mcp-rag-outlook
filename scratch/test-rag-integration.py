@@ -3,7 +3,7 @@ import json
 import random
 import time
 
-VLLM_URL = "http://localhost:8000/v1/chat/completions"
+VLLM_URL = "http://localhost:30000/v1/chat/completions"
 EMBEDDING_URL = "http://localhost:8080/v1/embeddings"
 MILVUS_URL = "http://localhost:18080"
 CONV_ID = "rag-integration-test-conv"

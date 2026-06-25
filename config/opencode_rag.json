@@ -80,7 +80,7 @@
       "npm": "@ai-sdk/openai-compatible",
       "name": "vLLM 5060ti Stack (Local)",
       "options": {
-        "baseURL": "http://localhost:8000/v1",
+        "baseURL": "http://localhost:30000/v1",
         "apiKey": "none",
         "extraBody": {
           "temperature": 0.6,

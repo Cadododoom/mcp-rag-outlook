@@ -13,7 +13,7 @@ tools:
           description: The semantic search query.
         compression_rate:
           type: float
-          default: 0.4
+          default: 0.33
           description: Target retention rate for LLMLingua-2 context compression.
       required:
         - query

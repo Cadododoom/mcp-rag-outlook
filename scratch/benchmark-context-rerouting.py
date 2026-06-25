@@ -4,7 +4,7 @@ import random
 import time
 import psutil
 
-VLLM_URL = "http://localhost:8000/v1/chat/completions"
+VLLM_URL = "http://localhost:30000/v1/chat/completions"
 EMBEDDING_URL = "http://127.0.0.1:8080/v1/embeddings"
 MILVUS_URL = "http://localhost:18080"
 CONV_ID = "proxy-routing-benchmark-conv"

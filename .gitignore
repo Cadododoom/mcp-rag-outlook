@@ -5,4 +5,8 @@ models/
 scratch/synthetic_codebase/
 bin/
 run-vulkan-embedding.ps1
+data/
+venv/
+__pycache__/
+*.pyc
 
