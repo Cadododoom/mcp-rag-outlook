@@ -1,8 +1,30 @@
 import os
+import sys
+
+# Limit CPU threads to 1/8th of the system CPU (min 2, max 8 threads) to prevent CPU starvation
+num_cpus = os.cpu_count() or 1
+target_threads = str(max(2, min(8, num_cpus // 8)))
+
+os.environ["OMP_NUM_THREADS"] = target_threads
+os.environ["MKL_NUM_THREADS"] = target_threads
+os.environ["OPENBLAS_NUM_THREADS"] = target_threads
+os.environ["VECLIB_MAXIMUM_THREADS"] = target_threads
+os.environ["NUMEXPR_NUM_THREADS"] = target_threads
+
+# Import torch to limit thread count programmatically
+try:
+    import torch
+    torch.set_num_threads(int(target_threads))
+    torch.set_num_interop_threads(1)
+except ImportError:
+    pass
+
 import lancedb
 import onnxruntime as ort
 import json
 from llmlingua import PromptCompressor
+
+_compressor = None
 
 def execute_tool(query: str, compression_rate: float = 0.33) -> str:
     try:
@@ -20,8 +42,9 @@ def execute_tool(query: str, compression_rate: float = 0.33) -> str:
         table_name = "raptor_collapsed_index"
         if table_name in db.table_names():
             table = db.open_table(table_name)
-            # Binary vector search leveraging fast bitwise operations on the host CPU
-            results = table.search(query).limit(50).to_arrow()
+            # Prefix query for BGE retrieval model
+            bge_query = f"Represent this sentence for searching relevant passages: {query}"
+            results = table.search(bge_query).limit(50).to_arrow()
             documents = results.to_pydict().get("text", [])
         else:
             # Fallback if table doesn't exist yet
