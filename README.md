@@ -90,15 +90,28 @@ To activate one of the configurations:
 
 ## Virtual Context (10K Cap) & Memory Loop Design
 
-### How the Context Loop Operates:
-1.  **Client-Side Truncation**: Both OpenCode (OpenChamber) and Hermes Agent support a sliding dialog window. When the active chat history exceeds the client's configured context length (which we set to `10000` tokens in the profile), the client automatically truncates the oldest messages in the array before prompting the LLM.
-2.  **Losing History**: Standard sliding windows cause the model to lose track of early decisions, configuration settings, or task milestones.
-3.  **The Memory Loop Solution**:
-4.  **Milestone Checkpoints**: As the agent performs tasks, it proactively calls the tool:
-        `store_chat_memory(conversationId, "Milestone summary", "Details of decisions/credentials")`
-    *   **Retrieval on Demand**: When the agent needs to verify past details (or when it realizes history has been truncated), it calls:
-        `retrieve_chat_memory(conversationId, "credentials or decisions setup")`
-    *   **VRAM Efficiency**: Since the retrieved snippet is extremely small (under 1K tokens), the agent can query 1M+ tokens of conversation history without inflating the active context beyond 10k tokens. This guarantees that **32 agents** can run simultaneously in GPU VRAM without causing swapping latency.
+1.  **Client-Side Context Setup (Critical)**: The client application (e.g. Hermes Agent `config.yaml` or OpenCode `opencode.json`) MUST have its `context_length` set to the target size (e.g. `1,000,000`). If configured to a lower limit, the client will truncate the history array locally before transmission. This prevents the proxy from intercepting and indexing the truncated messages into the vector database, permanently losing those memories.
+2.  **Proxy Truncation & Memory Loop**: When the proxy receives the 1M token payload, it indexes the message chunks into LanceDB/Milvus, truncates the active prompt down to the virtual context cap (e.g., `10,000` tokens), appends a `[SYSTEM WARNING]`, and forwards the compact prompt to the GPU LLM engine.
+3.  **VRAM Efficiency & RAG Retrieval**: Since the LLM receives the system warning, it knows older conversation context exists in the DB. When needed, the agent invokes `retrieve_chat_memory` to fetch a small segment (under 1K tokens), keeping active VRAM consumption capped at 10k/22k tokens. This guarantees that **32 agents** can run simultaneously in GPU VRAM without causing swapping latency or OOM crashes.
+
+---
+
+## Deliberations on Scaling Beyond 1 Million Context (NVMe Storage System)
+
+Configuring the agent's target context to **more than 1 million tokens (e.g., 10M, 100M, or more)** is highly beneficial for extensive multi-agent projects, codebases, and long-term execution threads. Because the storage layer is hosted on high-speed NVMe drives, we can allocate a large partition (e.g., **1 TB**) to support this architecture.
+
+### Storage Capacity Calculations (1 TB NVMe Allocation)
+*   **Vector Footprint**: Using `nomic-embed-text-v1.5` (768-dimension vectors), each text chunk is embedded into a vector.
+    $$\text{Size per Vector (FP32)} = 768 \times 4 \text{ bytes} = 3072 \text{ bytes} \approx 3 \text{ KB}$$
+*   Assuming an average chunk size of 512 tokens (~2000 characters), 1 million tokens represents about 2,000 chunks (vectors).
+    $$\text{VDB Storage per 1M tokens} = 2,000 \times 3 \text{ KB} = 6 \text{ MB}$$
+*   For **1 billion tokens** of agent memory, the vector database requires only **6 GB** of disk space (including indexing overhead, this scales to ~10-12 GB).
+*   **1 TB of NVMe storage** can store **~80-100 billion tokens** of historical agent workspace memory, code indexes, and conversation logs.
+
+### Key Considerations for Multi-Million Token Scaling
+1.  **Payload Serialization & Networking Overhead**: If the client context is set to 10M+ tokens, the HTTP payload containing raw JSON chat history sent from the client to the proxy on every turn will grow to ~30-40 MB. This causes serialization latency in Node.js/Python and network transfer delays.
+2.  **Hierarchical Vector Search**: As the database grows to hundreds of millions of vectors, search latency could degrade. However, Milvus/LanceDB's HNSW and IVF indexes keep queries sub-millisecond on NVMe-backed structures.
+3.  **Dynamic Compression (LLMLingua-2)**: Scaling retrieved context from large memories requires CPU-based compression to ensure the active context remains under the 10k/22k VRAM cap. A multi-million context architecture relies heavily on efficient token compression to avoid bottlenecking the prefill stage.
 
 ---
 
